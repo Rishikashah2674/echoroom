@@ -3,8 +3,7 @@ import Home from "./pages/Home";
 import Login from "./pages/Login";
 import Register from "./pages/Register";
 import Category from "./pages/Category";
-
-
+import Debate from "./pages/Debate";
 
 function App() {
   return (
@@ -14,6 +13,7 @@ function App() {
         <Route path="/login" element={<Login />} />
         <Route path="/register" element={<Register />} />
         <Route path="/category" element={<Category />} />
+        <Route path="/debate" element={<Debate />} />
       </Routes>
     </BrowserRouter>
   );
