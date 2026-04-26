@@ -1,39 +1,18 @@
-import { useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useEffect, useState } from "react";
+import { useNavigate, useParams } from "react-router-dom";
 import Navbar from "../components/navbar";
+import { authFetch, getAccessToken, logoutAndRedirect } from "../lib/auth";
 
-const SAMPLE_DEBATE = {
-  id:1, category:"Technology", categoryColor:"#7EC8C8",
-  title:"AI will replace software developers within 10 years",
-  description:"With the rapid advancement of AI coding tools like GitHub Copilot, ChatGPT, and Devin, many experts believe traditional software development roles will be automated. Others argue AI will augment developers, not replace them.",
-  forVotes:847, againstVotes:1203, createdBy:"tech_visionary", timeAgo:"2h ago",
-};
+const API_BASE = "http://127.0.0.1:8000";
 
-const INITIAL_OPINIONS = [
-  { id:1, stance:"FOR",     author:"future_coder",  avatar:"F", avatarColor:"#7EC8C8",
-    text:"AI tools are already writing 40-60% of production code in many companies. In 10 years, the remaining 40% will be automated too. The writing is on the wall — adapt or become obsolete.",
-    upvotes:234, downvotes:45, userVote:null, timeAgo:"1h ago",
-    replies:[{ id:11, author:"dev_realist", avatar:"D", avatarColor:"#B5A8D5", text:"Adapt to what exactly? If AI writes all code, what role do developers play?", timeAgo:"45m ago" }] },
-  { id:2, stance:"AGAINST", author:"senior_dev_99", avatar:"S", avatarColor:"#F4A7B9",
-    text:"I've been a developer for 15 years. AI is a powerful tool, but it lacks the ability to understand business context, stakeholder nuances, and architectural trade-offs. It will make us faster, not jobless.",
-    upvotes:412, downvotes:23, userVote:null, timeAgo:"90m ago",
-    replies:[
-      { id:21, author:"ml_engineer", avatar:"M", avatarColor:"#F9C784", text:"Exactly. AI still requires human oversight for anything non-trivial.", timeAgo:"1h ago" },
-      { id:22, author:"startup_cto", avatar:"C", avatarColor:"#A8D5BA", text:"The context problem is real — for now. But AI models are improving fast.", timeAgo:"30m ago" },
-    ]},
-  { id:3, stance:"FOR",     author:"ai_researcher", avatar:"A", avatarColor:"#7EC8C8",
-    text:"We already have AI agents that can autonomously debug, test, and deploy code. The trajectory is clear. Junior developers are already being replaced at scale in many tech companies.",
-    upvotes:178, downvotes:89, userVote:null, timeAgo:"3h ago", replies:[] },
-  { id:4, stance:"AGAINST", author:"pragmatic_pete", avatar:"P", avatarColor:"#B5A8D5",
-    text:"The complexity of real-world software systems — integrations, legacy code, human processes — is far beyond what current AI can handle reliably. 10 years is nowhere near enough time for that leap.",
-    upvotes:321, downvotes:67, userVote:null, timeAgo:"4h ago", replies:[] },
-];
-
-function OpinionCard({ opinion, onVote, onReply }) {
+function OpinionCard({ opinion, onVote, onReply, onEdit, onDelete, onReport, readOnly }) {
   const [hovered, setHovered] = useState(false);
   const [showReplyBox, setShowReplyBox] = useState(false);
   const [replyText, setReplyText] = useState("");
   const [showReplies, setShowReplies] = useState(true);
+  const [isEditing, setIsEditing] = useState(false);
+  const [editText, setEditText] = useState(opinion.text);
+  const canInteract = !readOnly;
   const isFor = opinion.stance === "FOR";
 
   return (
@@ -53,12 +32,45 @@ function OpinionCard({ opinion, onVote, onReply }) {
       </div>
       <p style={{ color:"rgba(240,236,255,0.82)", fontSize:15, lineHeight:1.7, fontFamily:"'Space Grotesk',sans-serif", marginBottom:16 }}>{opinion.text}</p>
       <div style={{ display:"flex", alignItems:"center", gap:12, flexWrap:"wrap" }}>
-        <button onClick={() => onVote(opinion.id,"up")} style={{ display:"flex", alignItems:"center", gap:6, background: opinion.userVote==="up" ? "rgba(126,200,200,0.15)" : "transparent", border:`1px solid ${opinion.userVote==="up" ? "rgba(126,200,200,0.4)" : "rgba(255,255,255,0.1)"}`, color: opinion.userVote==="up" ? "#7EC8C8" : "rgba(240,236,255,0.4)", borderRadius:7, padding:"5px 12px", cursor:"pointer", fontSize:13, fontFamily:"'Space Mono',monospace", transition:"all 0.2s" }}>▲ {opinion.upvotes}</button>
-        <button onClick={() => onVote(opinion.id,"down")} style={{ display:"flex", alignItems:"center", gap:6, background: opinion.userVote==="down" ? "rgba(244,167,185,0.15)" : "transparent", border:`1px solid ${opinion.userVote==="down" ? "rgba(244,167,185,0.4)" : "rgba(255,255,255,0.1)"}`, color: opinion.userVote==="down" ? "#F4A7B9" : "rgba(240,236,255,0.4)", borderRadius:7, padding:"5px 12px", cursor:"pointer", fontSize:13, fontFamily:"'Space Mono',monospace", transition:"all 0.2s" }}>▼ {opinion.downvotes}</button>
-        <button onClick={() => setShowReplyBox(!showReplyBox)} style={{ background:"transparent", border:"none", color:"rgba(240,236,255,0.35)", cursor:"pointer", fontSize:13, fontFamily:"'Space Mono',monospace" }}>💬 Reply</button>
+        <button
+          disabled={!canInteract}
+          onClick={() => canInteract && onVote(opinion.id,"up")}
+          style={{ display:"flex", alignItems:"center", gap:6, background: opinion.userVote==="up" ? "rgba(126,200,200,0.15)" : "transparent", border:`1px solid ${opinion.userVote==="up" ? "rgba(126,200,200,0.4)" : "rgba(255,255,255,0.1)"}`, color: opinion.userVote==="up" ? "#7EC8C8" : "rgba(240,236,255,0.4)", borderRadius:7, padding:"5px 12px", cursor: canInteract ? "pointer" : "not-allowed", fontSize:13, fontFamily:"'Space Mono',monospace", transition:"all 0.2s" }}
+        >▲ {opinion.upvotes}</button>
+        <button
+          disabled={!canInteract}
+          onClick={() => canInteract && onVote(opinion.id,"down")}
+          style={{ display:"flex", alignItems:"center", gap:6, background: opinion.userVote==="down" ? "rgba(244,167,185,0.15)" : "transparent", border:`1px solid ${opinion.userVote==="down" ? "rgba(244,167,185,0.4)" : "rgba(255,255,255,0.1)"}`, color: opinion.userVote==="down" ? "#F4A7B9" : "rgba(240,236,255,0.4)", borderRadius:7, padding:"5px 12px", cursor: canInteract ? "pointer" : "not-allowed", fontSize:13, fontFamily:"'Space Mono',monospace", transition:"all 0.2s" }}
+        >▼ {opinion.downvotes}</button>
+        {canInteract && (
+          <button onClick={() => setShowReplyBox(!showReplyBox)} style={{ background:"transparent", border:"none", color:"rgba(240,236,255,0.35)", cursor:"pointer", fontSize:13, fontFamily:"'Space Mono',monospace" }}>
+            💬 Reply
+          </button>
+        )}
+        {canInteract && opinion.isMine && (
+          <>
+            <button onClick={() => setIsEditing((v) => !v)} style={{ background:"transparent", border:"none", color:"rgba(240,236,255,0.35)", cursor:"pointer", fontSize:13, fontFamily:"'Space Mono',monospace" }}>
+              ✏ Edit
+            </button>
+            <button onClick={() => onDelete(opinion.id)} style={{ background:"transparent", border:"none", color:"rgba(244,167,185,0.65)", cursor:"pointer", fontSize:13, fontFamily:"'Space Mono',monospace" }}>
+              Delete
+            </button>
+          </>
+        )}
+        {canInteract && !opinion.isMine && (
+          <button onClick={() => onReport(opinion.id)} style={{ background:"transparent", border:"none", color:"rgba(249,199,132,0.65)", cursor:"pointer", fontSize:13, fontFamily:"'Space Mono',monospace" }}>
+            🚩 Report
+          </button>
+        )}
         {opinion.replies.length > 0 && <button onClick={() => setShowReplies(!showReplies)} style={{ background:"transparent", border:"none", color:"rgba(240,236,255,0.3)", cursor:"pointer", fontSize:12, fontFamily:"'Space Mono',monospace", marginLeft:"auto" }}>{showReplies?"▾":"▸"} {opinion.replies.length} {opinion.replies.length===1?"reply":"replies"}</button>}
       </div>
-      {showReplyBox && (
+      {isEditing && canInteract && opinion.isMine && (
+        <div style={{ marginTop:14, display:"flex", gap:10 }}>
+          <input value={editText} onChange={(e) => setEditText(e.target.value)} style={{ flex:1, background:"rgba(255,255,255,0.05)", border:"1px solid rgba(255,255,255,0.1)", borderRadius:8, padding:"10px 14px", color:"#f0ecff", fontSize:13, fontFamily:"'Space Grotesk',sans-serif", outline:"none" }} />
+          <button onClick={async () => { await onEdit(opinion.id, editText); setIsEditing(false); }} style={{ background:"linear-gradient(135deg,#7EC8C8,#a8dede)", border:"none", color:"#1a1625", borderRadius:8, padding:"10px 18px", fontWeight:700, cursor:"pointer", fontSize:13, fontFamily:"'Space Grotesk',sans-serif" }}>Save</button>
+        </div>
+      )}
+      {canInteract && showReplyBox && (
         <div style={{ marginTop:14, display:"flex", gap:10 }}>
           <input value={replyText} onChange={(e) => setReplyText(e.target.value)} placeholder="Write a reply..." style={{ flex:1, background:"rgba(255,255,255,0.05)", border:"1px solid rgba(255,255,255,0.1)", borderRadius:8, padding:"10px 14px", color:"#f0ecff", fontSize:13, fontFamily:"'Space Grotesk',sans-serif", outline:"none" }} />
           <button onClick={() => { onReply(opinion.id,replyText); setReplyText(""); setShowReplyBox(false); }} style={{ background:"linear-gradient(135deg,#7EC8C8,#a8dede)", border:"none", color:"#1a1625", borderRadius:8, padding:"10px 18px", fontWeight:700, cursor:"pointer", fontSize:13, fontFamily:"'Space Grotesk',sans-serif" }}>Post</button>
@@ -75,6 +87,11 @@ function OpinionCard({ opinion, onVote, onReply }) {
                   <span style={{ color:"rgba(240,236,255,0.25)", fontSize:11, fontFamily:"'Space Mono',monospace" }}>{reply.timeAgo}</span>
                 </div>
                 <p style={{ color:"rgba(240,236,255,0.6)", fontSize:13, lineHeight:1.6 }}>{reply.text}</p>
+                {canInteract && reply.isMine && (
+                  <button onClick={() => onDelete(reply.id)} style={{ marginTop:6, background:"transparent", border:"none", color:"rgba(244,167,185,0.65)", cursor:"pointer", fontSize:11, fontFamily:"'Space Mono',monospace", padding:0 }}>
+                    Delete reply
+                  </button>
+                )}
               </div>
             </div>
           ))}
@@ -86,33 +103,186 @@ function OpinionCard({ opinion, onVote, onReply }) {
 
 export default function Debate() {
   const navigate = useNavigate();
-  const [opinions, setOpinions] = useState(INITIAL_OPINIONS);
+  const { id } = useParams();
+  const accessToken = getAccessToken();
+  const readOnly = !accessToken;
+
+  const [opinions, setOpinions] = useState([]);
   const [activeTab, setActiveTab] = useState("ALL");
   const [newOpinion, setNewOpinion] = useState("");
   const [selectedStance, setSelectedStance] = useState(null);
   const [sortBy, setSortBy] = useState("top");
 
-  const debate = SAMPLE_DEBATE;
+  const [debate, setDebate] = useState({
+    id: 0,
+    category: "",
+    categoryColor: "#7EC8C8",
+    title: "",
+    description: "",
+    forVotes: 0,
+    againstVotes: 0,
+    createdBy: "",
+    timeAgo: "",
+  });
+  const [loading, setLoading] = useState(false);
+  const [actionError, setActionError] = useState("");
+
+  const loadDebate = async () => {
+    if (!id) return;
+    setLoading(true);
+    const headers = accessToken
+      ? { Authorization: `Bearer ${accessToken}` }
+      : {};
+    try {
+      const [topicRes, opinionsRes] = await Promise.all([
+        fetch(`${API_BASE}/api/debates/topics/${id}/`, { headers }),
+        fetch(`${API_BASE}/api/debates/topics/${id}/opinions/`, { headers }),
+      ]);
+
+      if (!topicRes.ok) throw new Error(`Topic fetch failed: ${topicRes.status}`);
+      if (!opinionsRes.ok) throw new Error(`Opinions fetch failed: ${opinionsRes.status}`);
+
+      const topicJson = await topicRes.json();
+      const opinionsJson = await opinionsRes.json();
+
+      setDebate({
+        id: topicJson.id,
+        category: topicJson.category,
+        categoryColor: topicJson.categoryColor,
+        title: topicJson.title,
+        description: topicJson.description,
+        forVotes: topicJson.forVotes,
+        againstVotes: topicJson.againstVotes,
+        createdBy: topicJson.createdBy,
+        timeAgo: topicJson.timeAgo,
+      });
+      setOpinions(opinionsJson);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadDebate();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [id]);
+
   const total  = debate.forVotes + debate.againstVotes;
-  const forPct = Math.round((debate.forVotes / total) * 100);
+  const forPct = total > 0 ? Math.round((debate.forVotes / total) * 100) : 0;
 
-  const handleVote = (opinionId, direction) => {
-    setOpinions((prev) => prev.map((op) => {
-      if (op.id !== opinionId) return op;
-      if (op.userVote === direction) return { ...op, userVote:null, upvotes: direction==="up" ? op.upvotes-1 : op.upvotes, downvotes: direction==="down" ? op.downvotes-1 : op.downvotes };
-      return { ...op, userVote:direction, upvotes: direction==="up" ? op.upvotes+1 : op.userVote==="up" ? op.upvotes-1 : op.upvotes, downvotes: direction==="down" ? op.downvotes+1 : op.userVote==="down" ? op.downvotes-1 : op.downvotes };
-    }));
+  const handleVote = async (opinionId, direction) => {
+    if (readOnly) return;
+    setActionError("");
+
+    const current = opinions.find((o) => o.id === opinionId);
+    const finalDirection = current?.userVote === direction ? "clear" : direction;
+    const res = await authFetch(`${API_BASE}/api/debates/opinions/${opinionId}/vote/`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ direction: finalDirection }),
+    });
+    if (res.status === 401) return logoutAndRedirect(navigate);
+
+    if (!res.ok) {
+      const json = await res.json().catch(() => ({}));
+      const detail = json?.detail || `Vote failed (${res.status})`;
+      setActionError(String(detail));
+      return;
+    }
+
+    await loadDebate();
   };
 
-  const handleReply = (opinionId, text) => {
+  const handleReply = async (opinionId, text) => {
     if (!text.trim()) return;
-    setOpinions((prev) => prev.map((op) => op.id!==opinionId ? op : { ...op, replies:[...op.replies,{ id:Date.now(), author:"you", avatar:"Y", avatarColor:"#7EC8C8", text, timeAgo:"just now" }] }));
+    if (readOnly) return;
+    setActionError("");
+
+    const trimmed = text.trim();
+    const res = await authFetch(
+      `${API_BASE}/api/debates/opinions/${opinionId}/replies/create/`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ content: trimmed }),
+      }
+    );
+    if (res.status === 401) return logoutAndRedirect(navigate);
+
+    if (!res.ok) {
+      const json = await res.json().catch(() => ({}));
+      const detail = json?.detail || `Reply failed (${res.status})`;
+      setActionError(String(detail));
+      return;
+    }
+
+    await loadDebate();
   };
 
-  const handlePost = () => {
+  const handlePost = async () => {
     if (!newOpinion.trim() || !selectedStance) return;
-    setOpinions((prev) => [{ id:Date.now(), stance:selectedStance, author:"you", avatar:"Y", avatarColor:"#7EC8C8", text:newOpinion, upvotes:0, downvotes:0, userVote:null, timeAgo:"just now", replies:[] }, ...prev]);
-    setNewOpinion(""); setSelectedStance(null);
+    if (readOnly) return;
+    setActionError("");
+
+    const trimmed = newOpinion.trim();
+    const res = await authFetch(`${API_BASE}/api/debates/topics/${id}/opinions/create/`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        stance: selectedStance,
+        content: trimmed,
+      }),
+    });
+    if (res.status === 401) return logoutAndRedirect(navigate);
+
+    if (!res.ok) {
+      const json = await res.json().catch(() => ({}));
+      const detail = json?.detail || `Post failed (${res.status})`;
+      setActionError(String(detail));
+      return;
+    }
+
+    setNewOpinion("");
+    setSelectedStance(null);
+    await loadDebate();
+  };
+
+  const handleEdit = async (opinionId, content) => {
+    if (!content.trim()) return;
+    const res = await authFetch(`${API_BASE}/api/debates/opinions/${opinionId}/`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ content: content.trim() }),
+    });
+    if (res.status === 401) return logoutAndRedirect(navigate);
+    if (!res.ok) return;
+    await loadDebate();
+  };
+
+  const handleDelete = async (opinionId) => {
+    const res = await authFetch(`${API_BASE}/api/debates/opinions/${opinionId}/`, {
+      method: "DELETE",
+    });
+    if (res.status === 401) return logoutAndRedirect(navigate);
+    if (!res.ok && res.status !== 204) return;
+    await loadDebate();
+  };
+
+  const handleReport = async (opinionId) => {
+    const res = await authFetch(`${API_BASE}/api/debates/opinions/${opinionId}/report/`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ reason: "Reported by user" }),
+    });
+    if (res.status === 401) return logoutAndRedirect(navigate);
+    if (!res.ok) return;
+    setActionError("Opinion reported for admin review.");
   };
 
   const filtered = opinions.filter((o) => activeTab==="ALL" || o.stance===activeTab).sort((a,b) => sortBy==="top" ? (b.upvotes-b.downvotes)-(a.upvotes-a.downvotes) : b.id-a.id);
@@ -151,23 +321,29 @@ export default function Debate() {
           </div>
         </div>
 
-        {/* Post opinion */}
-        <div style={{ background:"rgba(255,255,255,0.04)", border:"1px solid rgba(255,255,255,0.08)", borderRadius:16, padding:"24px", marginBottom:32, animation:"fadeSlideIn 0.5s ease 0.1s both" }}>
-          <h3 style={{ fontSize:15, fontWeight:600, marginBottom:16, color:"rgba(240,236,255,0.8)" }}>Share your opinion</h3>
-          <div style={{ display:"flex", gap:10, marginBottom:14 }}>
-            {["FOR","AGAINST"].map((stance) => (
-              <button key={stance} onClick={() => setSelectedStance(stance)} style={{ flex:1, padding:"10px", background: selectedStance===stance ? stance==="FOR" ? "rgba(126,200,200,0.15)" : "rgba(244,167,185,0.15)" : "rgba(255,255,255,0.03)", border:`1px solid ${selectedStance===stance ? stance==="FOR" ? "rgba(126,200,200,0.4)" : "rgba(244,167,185,0.4)" : "rgba(255,255,255,0.1)"}`, color: selectedStance===stance ? stance==="FOR" ? "#7EC8C8" : "#F4A7B9" : "rgba(240,236,255,0.35)", borderRadius:10, cursor:"pointer", fontSize:13, fontWeight:700, letterSpacing:1, fontFamily:"'Space Mono',monospace", transition:"all 0.2s" }}>
-                {stance==="FOR" ? "✓ I'm FOR this" : "✗ I'm AGAINST this"}
-              </button>
-            ))}
+        {!readOnly && (
+          <div style={{ background:"rgba(255,255,255,0.04)", border:"1px solid rgba(255,255,255,0.08)", borderRadius:16, padding:"24px", marginBottom:32, animation:"fadeSlideIn 0.5s ease 0.1s both" }}>
+            <h3 style={{ fontSize:15, fontWeight:600, marginBottom:16, color:"rgba(240,236,255,0.8)" }}>Share your opinion</h3>
+            {actionError && (
+              <div style={{ marginBottom: 12, background:"rgba(244,167,185,0.1)", border:"1px solid rgba(244,167,185,0.3)", borderRadius:8, padding:"10px 14px", color:"#F4A7B9", fontSize:13, fontFamily:"'Space Mono',monospace" }}>
+                Warning: {actionError}
+              </div>
+            )}
+            <div style={{ display:"flex", gap:10, marginBottom:14 }}>
+              {["FOR","AGAINST"].map((stance) => (
+                <button key={stance} onClick={() => setSelectedStance(stance)} style={{ flex:1, padding:"10px", background: selectedStance===stance ? stance==="FOR" ? "rgba(126,200,200,0.15)" : "rgba(244,167,185,0.15)" : "rgba(255,255,255,0.03)", border:`1px solid ${selectedStance===stance ? stance==="FOR" ? "rgba(126,200,200,0.4)" : "rgba(244,167,185,0.4)" : "rgba(255,255,255,0.1)"}`, color: selectedStance===stance ? stance==="FOR" ? "#7EC8C8" : "#F4A7B9" : "rgba(240,236,255,0.35)", borderRadius:10, cursor:"pointer", fontSize:13, fontWeight:700, letterSpacing:1, fontFamily:"'Space Mono',monospace", transition:"all 0.2s" }}>
+                  {stance==="FOR" ? "✓ I'm FOR this" : "✗ I'm AGAINST this"}
+                </button>
+              ))}
+            </div>
+            <textarea value={newOpinion} onChange={(e) => setNewOpinion(e.target.value)} placeholder="State your argument clearly and respectfully..." rows={3}
+              style={{ width:"100%", background:"rgba(255,255,255,0.05)", border:"1px solid rgba(255,255,255,0.1)", borderRadius:10, padding:"12px 16px", color:"#f0ecff", fontSize:14, lineHeight:1.6, fontFamily:"'Space Grotesk',sans-serif", resize:"vertical" }} />
+            <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginTop:12 }}>
+              <span style={{ color:"rgba(240,236,255,0.25)", fontSize:12, fontFamily:"'Space Mono',monospace" }}>{newOpinion.length}/500</span>
+              <button onClick={handlePost} disabled={!selectedStance||!newOpinion.trim()} style={{ background: selectedStance&&newOpinion.trim() ? "linear-gradient(135deg,#7EC8C8,#a8dede)" : "rgba(255,255,255,0.07)", border:"none", color: selectedStance&&newOpinion.trim() ? "#1a1625" : "rgba(240,236,255,0.2)", padding:"10px 24px", borderRadius:9, fontWeight:700, cursor: selectedStance&&newOpinion.trim() ? "pointer" : "not-allowed", fontSize:14, fontFamily:"'Space Grotesk',sans-serif", transition:"all 0.2s" }}>Post Opinion →</button>
+            </div>
           </div>
-          <textarea value={newOpinion} onChange={(e) => setNewOpinion(e.target.value)} placeholder="State your argument clearly and respectfully..." rows={3}
-            style={{ width:"100%", background:"rgba(255,255,255,0.05)", border:"1px solid rgba(255,255,255,0.1)", borderRadius:10, padding:"12px 16px", color:"#f0ecff", fontSize:14, lineHeight:1.6, fontFamily:"'Space Grotesk',sans-serif", resize:"vertical" }} />
-          <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginTop:12 }}>
-            <span style={{ color:"rgba(240,236,255,0.25)", fontSize:12, fontFamily:"'Space Mono',monospace" }}>{newOpinion.length}/500</span>
-            <button onClick={handlePost} disabled={!selectedStance||!newOpinion.trim()} style={{ background: selectedStance&&newOpinion.trim() ? "linear-gradient(135deg,#7EC8C8,#a8dede)" : "rgba(255,255,255,0.07)", border:"none", color: selectedStance&&newOpinion.trim() ? "#1a1625" : "rgba(240,236,255,0.2)", padding:"10px 24px", borderRadius:9, fontWeight:700, cursor: selectedStance&&newOpinion.trim() ? "pointer" : "not-allowed", fontSize:14, fontFamily:"'Space Grotesk',sans-serif", transition:"all 0.2s" }}>Post Opinion →</button>
-          </div>
-        </div>
+        )}
 
         {/* Filters */}
         <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:20 }}>
@@ -187,7 +363,7 @@ export default function Debate() {
 
         {/* Opinions */}
         <div style={{ display:"flex", flexDirection:"column", gap:14 }}>
-          {filtered.map((opinion) => <OpinionCard key={opinion.id} opinion={opinion} onVote={handleVote} onReply={handleReply} />)}
+          {loading ? <div style={{ color:"rgba(240,236,255,0.35)", fontSize:13 }}>Loading debate...</div> : filtered.map((opinion) => <OpinionCard key={opinion.id} opinion={opinion} onVote={handleVote} onReply={handleReply} onEdit={handleEdit} onDelete={handleDelete} onReport={handleReport} readOnly={readOnly} />)}
         </div>
       </main>
     </div>

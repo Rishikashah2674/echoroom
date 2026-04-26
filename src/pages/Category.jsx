@@ -1,38 +1,76 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import Navbar from "../components/navbar";
+import { authFetch, getAccessToken, logoutAndRedirect } from "../lib/auth";
 
-const CATEGORIES = [
-  { name:"Technology",  color:"#00f5d4", icon:"💻", debates:142, description:"AI, software, gadgets, and the digital future" },
-  { name:"Politics",    color:"#ff6b6b", icon:"🏛️", debates:89,  description:"Governance, policy, elections, and global affairs" },
-  { name:"Science",     color:"#a29bfe", icon:"🔬", debates:76,  description:"Research, discoveries, space, and medicine" },
-  { name:"Education",   color:"#fdcb6e", icon:"📚", debates:54,  description:"Schools, learning methods, and academic systems" },
-  { name:"Environment", color:"#55efc4", icon:"🌍", debates:98,  description:"Climate, sustainability, energy, and ecology" },
-  { name:"Society",     color:"#fd79a8", icon:"👥", debates:113, description:"Culture, ethics, social issues, and human rights" },
-  { name:"Economy",     color:"#e17055", icon:"📈", debates:67,  description:"Finance, trade, markets, and economic systems" },
-  { name:"Health",      color:"#00cec9", icon:"🏥", debates:81,  description:"Medicine, mental health, diet, and wellness" },
-];
-
-const ALL_DEBATES = [
-  { id:1, category:"Technology",  categoryColor:"#00f5d4", title:"AI will replace software developers within 10 years",         for:847,  against:1203, opinions:312, hot:true,  timeAgo:"2h ago" },
-  { id:2, category:"Politics",    categoryColor:"#ff6b6b", title:"Universal Basic Income is necessary for modern economies",     for:2103, against:1890, opinions:540, hot:true,  timeAgo:"5h ago" },
-  { id:3, category:"Science",     categoryColor:"#a29bfe", title:"Mars colonization should be humanity's top priority",          for:654,  against:432,  opinions:198, hot:false, timeAgo:"1d ago" },
-  { id:4, category:"Education",   categoryColor:"#fdcb6e", title:"Traditional universities will be obsolete in 20 years",        for:991,  against:1140, opinions:267, hot:false, timeAgo:"3d ago" },
-  { id:5, category:"Environment", categoryColor:"#55efc4", title:"Nuclear energy is essential for climate change goals",         for:1567, against:876,  opinions:423, hot:true,  timeAgo:"6h ago" },
-  { id:6, category:"Technology",  categoryColor:"#00f5d4", title:"Social media does more harm than good to society",             for:1100, against:980,  opinions:210, hot:false, timeAgo:"8h ago" },
-  { id:7, category:"Society",     categoryColor:"#fd79a8", title:"Remote work should become the permanent standard",             for:1340, against:760,  opinions:330, hot:true,  timeAgo:"12h ago" },
-  { id:8, category:"Health",      categoryColor:"#00cec9", title:"Mental health days should be mandatory in all workplaces",     for:2200, against:400,  opinions:480, hot:true,  timeAgo:"4h ago" },
-];
+const API_BASE = "http://127.0.0.1:8000";
 
 export default function Category() {
   const navigate = useNavigate();
   const [selected, setSelected] = useState(null);
+  const [categories, setCategories] = useState([]);
+  const [debates, setDebates] = useState([]);
+  const [loadingCategories, setLoadingCategories] = useState(true);
+  const [loadingDebates, setLoadingDebates] = useState(true);
+  const accessToken = getAccessToken();
+  const [newTopicTitle, setNewTopicTitle] = useState("");
+  const [newTopicDescription, setNewTopicDescription] = useState("");
+  const [newTopicCategory, setNewTopicCategory] = useState("");
+  const [topicPickerOpen, setTopicPickerOpen] = useState(false);
+  const [suggestCategoryName, setSuggestCategoryName] = useState("");
+  const [suggestCategoryDescription, setSuggestCategoryDescription] = useState("");
+  const [actionMessage, setActionMessage] = useState("");
 
-  const debates = selected
-    ? ALL_DEBATES.filter((d) => d.category === selected)
-    : ALL_DEBATES;
+  const activeCategory = categories.find((c) => c.name === selected);
+  const displayCategories = [
+    { name: "All", color: "#ffffff", icon: "💬", debates: 0, description: "" },
+    ...(categories || []),
+  ];
 
-  const activeCategory = CATEGORIES.find((c) => c.name === selected);
+  useEffect(() => {
+    let cancelled = false;
+    const loadCategories = async () => {
+      try {
+        const res = await fetch(`${API_BASE}/api/debates/categories/`);
+        if (!res.ok) throw new Error(`Categories fetch failed: ${res.status}`);
+        const json = await res.json();
+        if (!cancelled) setCategories(json);
+      } catch {
+        if (!cancelled) setCategories([]);
+      } finally {
+        if (!cancelled) setLoadingCategories(false);
+      }
+    };
+    loadCategories();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    const loadDebates = async () => {
+      setLoadingDebates(true);
+      try {
+        const url = new URL(`${API_BASE}/api/debates/topics/`);
+        url.searchParams.set("sort", "hot");
+        if (selected) url.searchParams.set("category", selected);
+
+        const res = await fetch(url.toString());
+        if (!res.ok) throw new Error(`Debates fetch failed: ${res.status}`);
+        const json = await res.json();
+        if (!cancelled) setDebates(json);
+      } catch {
+        if (!cancelled) setDebates([]);
+      } finally {
+        if (!cancelled) setLoadingDebates(false);
+      }
+    };
+    loadDebates();
+    return () => {
+      cancelled = true;
+    };
+  }, [selected]);
 
   return (
     <div style={{ minHeight:"100vh", background:"#08080f",
@@ -52,12 +90,128 @@ export default function Category() {
         <div style={{ marginBottom:40, animation:"fadeSlideIn 0.5s ease both" }}>
           <h1 style={{ fontFamily:"'Playfair Display',serif", fontSize:"clamp(28px,4vw,42px)",
             fontWeight:900, marginBottom:10 }}>
-            {selected ? `${activeCategory.icon} ${selected}` : "All Categories"}
+            {selected ? `${activeCategory?.icon || ""} ${selected}` : "All Categories"}
           </h1>
           <p style={{ color:"rgba(255,255,255,0.4)", fontSize:15 }}>
-            {selected ? activeCategory.description : "Browse debates by topic — find what matters to you"}
+            {selected ? activeCategory?.description : "Browse debates by topic — find what matters to you"}
           </p>
         </div>
+
+        {accessToken && (
+          <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:16, marginBottom:24 }}>
+            <div style={{ background:"rgba(255,255,255,0.03)", border:"1px solid rgba(255,255,255,0.07)", borderRadius:14, padding:"16px" }}>
+              <h3 style={{ marginBottom:10 }}>Create Debate Topic</h3>
+              <input value={newTopicTitle} onChange={(e) => setNewTopicTitle(e.target.value)} placeholder="Topic title" style={{ width:"100%", marginBottom:8, background:"rgba(255,255,255,0.05)", border:"1px solid rgba(255,255,255,0.1)", borderRadius:8, padding:"10px", color:"#fff" }} />
+              <textarea value={newTopicDescription} onChange={(e) => setNewTopicDescription(e.target.value)} placeholder="Description" rows={2} style={{ width:"100%", marginBottom:8, background:"rgba(255,255,255,0.05)", border:"1px solid rgba(255,255,255,0.1)", borderRadius:8, padding:"10px", color:"#fff" }} />
+              <div style={{ position:"relative", marginBottom:8 }}>
+                <button
+                  type="button"
+                  onClick={() => setTopicPickerOpen((v) => !v)}
+                  style={{
+                    width:"100%",
+                    background:"rgba(255,255,255,0.05)",
+                    border:`1px solid ${topicPickerOpen ? "rgba(0,245,212,0.45)" : "rgba(255,255,255,0.1)"}`,
+                    borderRadius:8,
+                    padding:"10px 12px",
+                    color:newTopicCategory ? "#f0ecff" : "rgba(240,236,255,0.35)",
+                    display:"flex",
+                    justifyContent:"space-between",
+                    alignItems:"center",
+                    cursor:"pointer",
+                    fontSize:13,
+                    fontFamily:"'Space Grotesk',sans-serif",
+                  }}
+                >
+                  <span>{newTopicCategory || "Select category"}</span>
+                  <span style={{ color:"rgba(240,236,255,0.5)", fontSize:11 }}>{topicPickerOpen ? "▴" : "▾"}</span>
+                </button>
+                {topicPickerOpen && (
+                  <div style={{
+                    position:"absolute",
+                    top:"calc(100% + 6px)",
+                    left:0,
+                    right:0,
+                    background:"rgba(12,12,22,0.98)",
+                    border:"1px solid rgba(255,255,255,0.12)",
+                    borderRadius:10,
+                    overflow:"hidden",
+                    zIndex:20,
+                    boxShadow:"0 10px 30px rgba(0,0,0,0.4)",
+                    maxHeight:220,
+                    overflowY:"auto",
+                  }}>
+                    {categories.map((c) => (
+                      <button
+                        key={c.name}
+                        type="button"
+                        onClick={() => {
+                          setNewTopicCategory(c.name);
+                          setTopicPickerOpen(false);
+                        }}
+                        style={{
+                          width:"100%",
+                          textAlign:"left",
+                          background:newTopicCategory === c.name ? "rgba(0,245,212,0.12)" : "transparent",
+                          border:"none",
+                          borderBottom:"1px solid rgba(255,255,255,0.06)",
+                          color:newTopicCategory === c.name ? "#00f5d4" : "rgba(240,236,255,0.85)",
+                          padding:"10px 12px",
+                          cursor:"pointer",
+                          fontSize:13,
+                          fontFamily:"'Space Grotesk',sans-serif",
+                        }}
+                      >
+                        {c.icon ? `${c.icon} ` : ""}{c.name}
+                      </button>
+                    ))}
+                    {categories.length === 0 && (
+                      <div style={{ padding:"10px 12px", color:"rgba(240,236,255,0.45)", fontSize:12 }}>
+                        No categories available.
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+              <button onClick={async () => {
+                setActionMessage("");
+                const res = await authFetch(`${API_BASE}/api/debates/topics/create/`, {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ title: newTopicTitle.trim(), description: newTopicDescription.trim(), category: newTopicCategory }),
+                });
+                if (res.status === 401) return logoutAndRedirect(navigate);
+                if (!res.ok) return setActionMessage("Could not submit topic.");
+                setNewTopicTitle(""); setNewTopicDescription(""); setNewTopicCategory("");
+                setActionMessage("Topic submitted for admin approval.");
+              }} style={{ background:"linear-gradient(135deg,#00f5d4,#00b4d8)", border:"none", color:"#08080f", padding:"9px 14px", borderRadius:8, cursor:"pointer", fontWeight:700 }}>
+                Submit Topic
+              </button>
+            </div>
+
+            <div style={{ background:"rgba(255,255,255,0.03)", border:"1px solid rgba(255,255,255,0.07)", borderRadius:14, padding:"16px" }}>
+              <h3 style={{ marginBottom:10 }}>Suggest New Category</h3>
+              <input value={suggestCategoryName} onChange={(e) => setSuggestCategoryName(e.target.value)} placeholder="Category name" style={{ width:"100%", marginBottom:8, background:"rgba(255,255,255,0.05)", border:"1px solid rgba(255,255,255,0.1)", borderRadius:8, padding:"10px", color:"#fff" }} />
+              <textarea value={suggestCategoryDescription} onChange={(e) => setSuggestCategoryDescription(e.target.value)} placeholder="Description (optional)" rows={2} style={{ width:"100%", marginBottom:8, background:"rgba(255,255,255,0.05)", border:"1px solid rgba(255,255,255,0.1)", borderRadius:8, padding:"10px", color:"#fff" }} />
+              <button onClick={async () => {
+                setActionMessage("");
+                const res = await authFetch(`${API_BASE}/api/debates/categories/suggest/`, {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ name: suggestCategoryName.trim(), description: suggestCategoryDescription.trim() }),
+                });
+                if (res.status === 401) return logoutAndRedirect(navigate);
+                if (!res.ok) return setActionMessage("Could not submit category suggestion.");
+                setSuggestCategoryName(""); setSuggestCategoryDescription("");
+                setActionMessage("Category suggestion submitted for admin review.");
+              }} style={{ background:"transparent", border:"1px solid rgba(0,245,212,0.45)", color:"#00f5d4", padding:"9px 14px", borderRadius:8, cursor:"pointer", fontWeight:700 }}>
+                Suggest Category
+              </button>
+            </div>
+          </div>
+        )}
+        {actionMessage && (
+          <div style={{ marginBottom:18, color:"rgba(240,236,255,0.75)", fontSize:13 }}>{actionMessage}</div>
+        )}
 
         {/* Category pills */}
         <div style={{ display:"flex", gap:10, flexWrap:"wrap", marginBottom:40,
@@ -69,7 +223,9 @@ export default function Category() {
             borderRadius:8, padding:"8px 18px", cursor:"pointer",
             fontSize:13, fontWeight:600, fontFamily:"'Space Grotesk',sans-serif", transition:"all 0.2s",
           }}>All</button>
-          {CATEGORIES.map((cat) => (
+          {displayCategories
+            .filter((c) => c.name !== "All")
+            .map((cat) => (
             <button key={cat.name} onClick={() => setSelected(cat.name === selected ? null : cat.name)} style={{
               background: selected===cat.name ? `${cat.color}22` : "rgba(255,255,255,0.03)",
               border:`1px solid ${selected===cat.name ? cat.color+"55" : "rgba(255,255,255,0.08)"}`,
@@ -84,7 +240,10 @@ export default function Category() {
         {!selected && (
           <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fill,minmax(220px,1fr))",
             gap:16, marginBottom:48, animation:"fadeSlideIn 0.5s ease 0.1s both" }}>
-            {CATEGORIES.map((cat) => (
+            {loadingCategories ? (
+              <div style={{ gridColumn: "1 / -1", color:"rgba(255,255,255,0.35)", fontSize:13 }}>Loading categories...</div>
+            ) : (
+              categories.map((cat) => (
               <div key={cat.name} onClick={() => setSelected(cat.name)}
                 style={{
                   background:"rgba(255,255,255,0.03)",
@@ -116,7 +275,8 @@ export default function Category() {
                   <span style={{ color:cat.color, fontSize:14 }}>→</span>
                 </div>
               </div>
-            ))}
+            ))
+            )}
           </div>
         )}
 
@@ -127,9 +287,12 @@ export default function Category() {
             {selected ? `${debates.length} Debates in ${selected}` : "All Debates"}
           </h2>
           <div style={{ display:"flex", flexDirection:"column", gap:14 }}>
-            {debates.map((debate, i) => {
+            {loadingDebates ? (
+              <div style={{ color:"rgba(255,255,255,0.35)", fontSize:13 }}>Loading debates...</div>
+            ) : (
+              debates.map((debate, i) => {
               const total  = debate.for + debate.against;
-              const forPct = Math.round((debate.for / total) * 100);
+              const forPct = total > 0 ? Math.round((debate.for / total) * 100) : 0;
               return (
                 <div key={debate.id} onClick={() => navigate(`/debate/${debate.id}`)}
                   style={{
@@ -172,7 +335,8 @@ export default function Category() {
                   </div>
                 </div>
               );
-            })}
+            })
+            )}
           </div>
         </div>
       </main>

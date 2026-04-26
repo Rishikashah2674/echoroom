@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 
 export default function Login() {
-  const [email,    setEmail]    = useState("");
+  const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [focused,  setFocused]  = useState("");
   const [loading,  setLoading]  = useState(false);
@@ -10,10 +10,43 @@ export default function Login() {
   const navigate = useNavigate();
 
   const handleLogin = () => {
-    if (!email || !password) { setError("Please fill in all fields."); return; }
+    if (!username || !password) { setError("Please fill in all fields."); return; }
     setError("");
     setLoading(true);
-    setTimeout(() => { setLoading(false); navigate("/"); }, 1500);
+
+    const API_BASE = "http://127.0.0.1:8000";
+    fetch(`${API_BASE}/api/token/`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ username, password }),
+    })
+      .then(async (res) => {
+        const json = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          const detail = json?.detail || `Login failed (${res.status})`;
+          throw new Error(detail);
+        }
+        if (json?.access) localStorage.setItem("access", json.access);
+        if (json?.refresh) localStorage.setItem("refresh", json.refresh);
+        if (json?.access) {
+          const adminRes = await fetch(`${API_BASE}/api/admin/stats/`, {
+            headers: { Authorization: `Bearer ${json.access}` },
+          });
+          if (adminRes.ok) localStorage.setItem("is_admin", "true");
+          else localStorage.removeItem("is_admin");
+        }
+        return json;
+      })
+      .then(() => {
+        setLoading(false);
+        navigate("/");
+      })
+      .catch((e) => {
+        setLoading(false);
+        setError(String(e?.message || e));
+      });
   };
 
   return (
@@ -76,13 +109,13 @@ export default function Login() {
           <div>
             <label style={{ display:"block", color:"rgba(255,255,255,0.5)", fontSize:11,
               fontFamily:"'Space Mono',monospace", letterSpacing:1.2, textTransform:"uppercase", marginBottom:7 }}>
-              Email
+              Username
             </label>
-            <input type="email" value={email} onChange={(e) => setEmail(e.target.value)}
-              onFocus={() => setFocused("email")} onBlur={() => setFocused("")}
-              placeholder="you@example.com"
+            <input type="text" value={username} onChange={(e) => setUsername(e.target.value)}
+              onFocus={() => setFocused("username")} onBlur={() => setFocused("")}
+              placeholder="your_username"
               style={{ width:"100%", background:"rgba(255,255,255,0.04)",
-                border:`1px solid ${focused==="email" ? "rgba(0,245,212,0.5)" : "rgba(255,255,255,0.1)"}`,
+                border:`1px solid ${focused==="username" ? "rgba(0,245,212,0.5)" : "rgba(255,255,255,0.1)"}`,
                 borderRadius:10, padding:"13px 16px", color:"#ffffff", fontSize:15,
                 fontFamily:"'Space Grotesk',sans-serif", transition:"border-color 0.2s" }} />
           </div>

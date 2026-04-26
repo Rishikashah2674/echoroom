@@ -1,9 +1,11 @@
-import { useState } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
+import { clearSession } from "../lib/auth";
 
 export default function Navbar() {
   const navigate = useNavigate();
   const location = useLocation();
+  const isLoggedIn = Boolean(localStorage.getItem("access"));
+  const isAdmin = localStorage.getItem("is_admin") === "true";
 
   const navLinks = [
     { label: "Browse",     path: "/" },
@@ -67,25 +69,86 @@ export default function Navbar() {
               {link.label}
             </button>
           ))}
+          {isAdmin && (
+            <button
+              className="nav-link-btn"
+              onClick={() => navigate("/admin")}
+              style={{
+                background: isActive("/admin") ? "rgba(255,255,255,0.08)" : "transparent",
+                border: "none",
+                color: isActive("/admin") ? "#ffffff" : "rgba(255,255,255,0.45)",
+                padding: "8px 16px",
+                borderRadius: 8,
+                cursor: "pointer",
+                fontSize: 14,
+                fontWeight: 500,
+                fontFamily: "'Space Grotesk', sans-serif",
+                transition: "all 0.2s",
+              }}
+            >
+              Admin
+            </button>
+          )}
+          {isLoggedIn && (
+            <button
+              className="nav-link-btn"
+              onClick={() => navigate("/profile")}
+              style={{
+                background: isActive("/profile") ? "rgba(255,255,255,0.08)" : "transparent",
+                border: "none",
+                color: isActive("/profile") ? "#ffffff" : "rgba(255,255,255,0.45)",
+                padding: "8px 16px",
+                borderRadius: 8,
+                cursor: "pointer",
+                fontSize: 14,
+                fontWeight: 500,
+                fontFamily: "'Space Grotesk', sans-serif",
+                transition: "all 0.2s",
+              }}
+            >
+              Profile
+            </button>
+          )}
         </div>
 
         {/* Auth */}
         <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
-          <button className="nav-login" onClick={() => navigate("/login")}
-            style={{
-              background: "transparent",
-              border: "1px solid rgba(255,255,255,0.15)",
-              color: "rgba(255,255,255,0.65)", padding: "8px 18px", borderRadius: 8,
-              cursor: "pointer", fontSize: 14,
-              fontFamily: "'Space Grotesk', sans-serif", transition: "all 0.2s",
-            }}>Log in</button>
-          <button className="nav-join" onClick={() => navigate("/register")}
-            style={{
-              background: "linear-gradient(135deg, #00f5d4, #00b4d8)",
-              border: "none", color: "#08080f", padding: "8px 20px", borderRadius: 8,
-              cursor: "pointer", fontSize: 14, fontWeight: 700,
-              fontFamily: "'Space Grotesk', sans-serif", transition: "all 0.2s",
-            }}>Join Now</button>
+          {!isLoggedIn ? (
+            <>
+              <button className="nav-login" onClick={() => navigate("/login")}
+                style={{
+                  background: "transparent",
+                  border: "1px solid rgba(255,255,255,0.15)",
+                  color: "rgba(255,255,255,0.65)", padding: "8px 18px", borderRadius: 8,
+                  cursor: "pointer", fontSize: 14,
+                  fontFamily: "'Space Grotesk', sans-serif", transition: "all 0.2s",
+                }}>Log in</button>
+              <button className="nav-join" onClick={() => navigate("/register")}
+                style={{
+                  background: "linear-gradient(135deg, #00f5d4, #00b4d8)",
+                  border: "none", color: "#08080f", padding: "8px 20px", borderRadius: 8,
+                  cursor: "pointer", fontSize: 14, fontWeight: 700,
+                  fontFamily: "'Space Grotesk', sans-serif", transition: "all 0.2s",
+                }}>Join Now</button>
+            </>
+          ) : (
+            <button
+              className="nav-login"
+              onClick={() => {
+                clearSession();
+                navigate("/login");
+              }}
+              style={{
+                background: "transparent",
+                border: "1px solid rgba(255,255,255,0.15)",
+                color: "rgba(255,255,255,0.65)", padding: "8px 18px", borderRadius: 8,
+                cursor: "pointer", fontSize: 14,
+                fontFamily: "'Space Grotesk', sans-serif", transition: "all 0.2s",
+              }}
+            >
+              Logout
+            </button>
+          )}
         </div>
       </nav>
     </>

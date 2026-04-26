@@ -1,77 +1,12 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import Navbar from "../components/navbar";
 
-const debates = [
-  {
-    id: 1,
-    category: "Technology",
-    categoryColor: "#00f5d4",
-    title: "AI will replace software developers within 10 years",
-    for: 847,
-    against: 1203,
-    opinions: 312,
-    hot: true,
-    timeAgo: "2h ago",
-  },
-  {
-    id: 2,
-    category: "Politics",
-    categoryColor: "#ff6b6b",
-    title: "Universal Basic Income is necessary for modern economies",
-    for: 2103,
-    against: 1890,
-    opinions: 540,
-    hot: true,
-    timeAgo: "5h ago",
-  },
-  {
-    id: 3,
-    category: "Science",
-    categoryColor: "#a29bfe",
-    title: "Mars colonization should be humanity's top priority",
-    for: 654,
-    against: 432,
-    opinions: 198,
-    hot: false,
-    timeAgo: "1d ago",
-  },
-  {
-    id: 4,
-    category: "Education",
-    categoryColor: "#fdcb6e",
-    title: "Traditional universities will be obsolete in 20 years",
-    for: 991,
-    against: 1140,
-    opinions: 267,
-    hot: false,
-    timeAgo: "3d ago",
-  },
-  {
-    id: 5,
-    category: "Environment",
-    categoryColor: "#55efc4",
-    title: "Nuclear energy is essential for climate change goals",
-    for: 1567,
-    against: 876,
-    opinions: 423,
-    hot: true,
-    timeAgo: "6h ago",
-  },
-];
-
-const categories = [
-  { name: "All", color: "#ffffff" },
-  { name: "Technology", color: "#00f5d4" },
-  { name: "Politics", color: "#ff6b6b" },
-  { name: "Science", color: "#a29bfe" },
-  { name: "Education", color: "#fdcb6e" },
-  { name: "Environment", color: "#55efc4" },
-];
+const API_BASE = "http://127.0.0.1:8000";
 
 function VoteBar({ forVotes, againstVotes }) {
   const total = forVotes + againstVotes;
-  const forPct = Math.round((forVotes / total) * 100);
+  const forPct = total > 0 ? Math.round((forVotes / total) * 100) : 0;
   return (
     <div style={{ width: "100%" }}>
       <div
@@ -267,13 +202,72 @@ function DebateCard({ debate, index }) {
 
 export default function Home() {
   const navigate = useNavigate();
+  const isLoggedIn = Boolean(localStorage.getItem("access"));
   const [activeCategory, setActiveCategory] = useState("All");
+  const [categories, setCategories] = useState([]);
+  const [debates, setDebates] = useState([]);
+  const [sort, setSort] = useState("hot"); // hot | new | top
+  const [searchQuery, setSearchQuery] = useState("");
   const [searchFocused, setSearchFocused] = useState(false);
+  const [loadingDebates, setLoadingDebates] = useState(true);
 
-  const filtered =
-    activeCategory === "All"
-      ? debates
-      : debates.filter((d) => d.category === activeCategory);
+  const displayCategories = [
+    { name: "All", color: "#ffffff" },
+    ...(categories || []),
+  ];
+
+  const filtered = debates;
+
+  useEffect(() => {
+    let cancelled = false;
+    const loadCategories = async () => {
+      try {
+        const res = await fetch(`${API_BASE}/api/debates/categories/`);
+        if (!res.ok) throw new Error(`Categories fetch failed: ${res.status}`);
+        const json = await res.json();
+        if (!cancelled) setCategories(json);
+      } catch {
+        if (!cancelled) setCategories([]);
+      }
+    };
+    loadCategories();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadDebates = async () => {
+      setLoadingDebates(true);
+      try {
+        const url = new URL(`${API_BASE}/api/debates/topics/`);
+        url.searchParams.set("sort", sort);
+
+        if (activeCategory !== "All") {
+          url.searchParams.set("category", activeCategory);
+        }
+        if (searchQuery.trim()) {
+          url.searchParams.set("q", searchQuery.trim());
+        }
+
+        const res = await fetch(url.toString());
+        if (!res.ok) throw new Error(`Debates fetch failed: ${res.status}`);
+        const json = await res.json();
+        if (!cancelled) setDebates(json);
+      } catch (e) {
+        if (!cancelled) setDebates([]);
+      } finally {
+        if (!cancelled) setLoadingDebates(false);
+      }
+    };
+
+    loadDebates();
+    return () => {
+      cancelled = true;
+    };
+  }, [activeCategory, sort, searchQuery]);
 
   return (
     <div
@@ -444,6 +438,8 @@ export default function Home() {
               placeholder="Search debates..."
               onFocus={() => setSearchFocused(true)}
               onBlur={() => setSearchFocused(false)}
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
               style={{
                 flex: 1,
                 background: "transparent",
@@ -533,7 +529,7 @@ export default function Home() {
             animation: "fadeSlideIn 0.6s ease 0.15s both",
           }}
         >
-          {categories.map((cat) => (
+          {displayCategories.map((cat) => (
             <button
               key={cat.name}
               onClick={() => setActiveCategory(cat.name)}
@@ -601,17 +597,19 @@ export default function Home() {
               : `${activeCategory} Debates`}
           </h2>
           <div style={{ display: "flex", gap: 6 }}>
-            {["Hot", "New", "Top"].map((s, i) => (
+            {[
+              { label: "Hot", value: "hot" },
+              { label: "New", value: "new" },
+              { label: "Top", value: "top" },
+            ].map((s) => (
               <button
-                key={s}
+                key={s.value}
+                onClick={() => setSort(s.value)}
                 style={{
-                  background:
-                    i === 0 ? "rgba(255,107,107,0.15)" : "transparent",
                   border:
-                    i === 0
-                      ? "1px solid rgba(255,107,107,0.3)"
-                      : "1px solid transparent",
-                  color: i === 0 ? "#ff6b6b" : "rgba(255,255,255,0.3)",
+                    sort === s.value ? "1px solid rgba(255,107,107,0.3)" : "1px solid transparent",
+                  background: sort === s.value ? "rgba(255,107,107,0.15)" : "transparent",
+                  color: sort === s.value ? "#ff6b6b" : "rgba(255,255,255,0.3)",
                   borderRadius: 6,
                   padding: "4px 12px",
                   cursor: "pointer",
@@ -619,7 +617,7 @@ export default function Home() {
                   fontFamily: "'Space Mono',monospace",
                 }}
               >
-                {s}
+                {s.label}
               </button>
             ))}
           </div>
@@ -627,9 +625,15 @@ export default function Home() {
 
         {/* Cards */}
         <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-          {filtered.map((debate, i) => (
-            <DebateCard key={debate.id} debate={debate} index={i} />
-          ))}
+          {loadingDebates ? (
+            <div style={{ color: "rgba(255,255,255,0.35)", fontSize: 13 }}>
+              Loading debates...
+            </div>
+          ) : (
+            filtered.map((debate, i) => (
+              <DebateCard key={debate.id} debate={debate} index={i} />
+            ))
+          )}
         </div>
 
         {/* CTA */}
@@ -657,7 +661,7 @@ export default function Home() {
                 marginBottom: 8,
               }}
             >
-              Ready to make your case?
+              {isLoggedIn ? "Ready for your next argument?" : "Ready to make your case?"}
             </h3>
             <p
               style={{
@@ -666,7 +670,9 @@ export default function Home() {
                 lineHeight: 1.6,
               }}
             >
-              Join thousands of debaters. Pick a side. Defend it.
+              {isLoggedIn
+                ? "Pick a debate, share your stance, and keep the conversation moving."
+                : "Join thousands of debaters. Pick a side. Defend it."}
             </p>
           </div>
           <div style={{ display: "flex", gap: 12, flexShrink: 0 }}>
@@ -685,22 +691,41 @@ export default function Home() {
             >
               Browse Debates
             </button>
-            <button
-              onClick={() => navigate("/register")}
-              style={{
-                background: "linear-gradient(135deg,#00f5d4,#00b4d8)",
-                border: "none",
-                color: "#08080f",
-                padding: "12px 24px",
-                borderRadius: 10,
-                cursor: "pointer",
-                fontSize: 14,
-                fontWeight: 700,
-                fontFamily: "'Space Grotesk',sans-serif",
-              }}
-            >
-              Create Account →
-            </button>
+            {!isLoggedIn ? (
+              <button
+                onClick={() => navigate("/register")}
+                style={{
+                  background: "linear-gradient(135deg,#00f5d4,#00b4d8)",
+                  border: "none",
+                  color: "#08080f",
+                  padding: "12px 24px",
+                  borderRadius: 10,
+                  cursor: "pointer",
+                  fontSize: 14,
+                  fontWeight: 700,
+                  fontFamily: "'Space Grotesk',sans-serif",
+                }}
+              >
+                Create Account →
+              </button>
+            ) : (
+              <button
+                onClick={() => navigate("/categories")}
+                style={{
+                  background: "linear-gradient(135deg,#00f5d4,#00b4d8)",
+                  border: "none",
+                  color: "#08080f",
+                  padding: "12px 24px",
+                  borderRadius: 10,
+                  cursor: "pointer",
+                  fontSize: 14,
+                  fontWeight: 700,
+                  fontFamily: "'Space Grotesk',sans-serif",
+                }}
+              >
+                Start a Topic →
+              </button>
+            )}
           </div>
         </div>
       </main>

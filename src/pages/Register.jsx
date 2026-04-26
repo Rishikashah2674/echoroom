@@ -11,6 +11,22 @@ export default function Register() {
 
   const update = (field, val) => setForm((f) => ({ ...f, [field]: val }));
 
+  const extractError = (json, status) => {
+    if (!json || typeof json !== "object") return `Register failed (${status})`;
+    if (typeof json.detail === "string") return json.detail;
+    const prioritized = ["confirm_password", "username", "email", "password", "non_field_errors"];
+    for (const key of prioritized) {
+      const v = json[key];
+      if (Array.isArray(v) && v[0]) return String(v[0]);
+      if (typeof v === "string" && v) return v;
+    }
+    for (const value of Object.values(json)) {
+      if (Array.isArray(value) && value[0]) return String(value[0]);
+      if (typeof value === "string" && value) return value;
+    }
+    return `Register failed (${status})`;
+  };
+
   const handleRegister = () => {
     if (!form.username || !form.email || !form.password || !form.confirm) {
       setError("Please fill in all fields."); return;
@@ -18,8 +34,41 @@ export default function Register() {
     if (form.password !== form.confirm) {
       setError("Passwords do not match."); return;
     }
-    setError(""); setLoading(true);
-    setTimeout(() => { setLoading(false); setSuccess(true); }, 1500);
+
+    setError("");
+    setLoading(true);
+    setSuccess(false);
+
+    const API_BASE = "http://127.0.0.1:8000";
+    fetch(`${API_BASE}/api/auth/register/`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        username: form.username,
+        email: form.email,
+        password: form.password,
+        confirm_password: form.confirm,
+      }),
+    })
+      .then(async (res) => {
+        const json = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          throw new Error(extractError(json, res.status));
+        }
+        return json;
+      })
+      .then((json) => {
+        if (json?.access) localStorage.setItem("access", json.access);
+        if (json?.refresh) localStorage.setItem("refresh", json.refresh);
+        localStorage.removeItem("is_admin");
+        setLoading(false);
+        setSuccess(true);
+        navigate("/");
+      })
+      .catch((e) => {
+        setLoading(false);
+        setError(String(e?.message || e));
+      });
   };
 
   const fields = [

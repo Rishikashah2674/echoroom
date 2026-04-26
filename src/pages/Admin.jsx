@@ -1,51 +1,332 @@
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import Navbar from "../components/navbar";
+import { authFetch, logoutAndRedirect } from "../lib/auth";
 
-const PENDING_TOPICS = [
-  { id:1, title:"Should coding be a mandatory subject in all schools?", category:"Education", author:"edu_reformer", submitted:"1h ago" },
-  { id:2, title:"Is cryptocurrency the future of global finance?",       category:"Economy",   author:"crypto_bull",  submitted:"3h ago" },
-  { id:3, title:"Should voting be made mandatory in democracies?",       category:"Politics",  author:"civic_voice",  submitted:"5h ago" },
-];
+const API_BASE = "http://127.0.0.1:8000";
 
-const FLAGGED_OPINIONS = [
-  { id:1, author:"angry_user_99", text:"This is complete nonsense and anyone who believes this is an idiot.", debate:"AI replacing developers", reason:"Disrespectful language", timeAgo:"30m ago" },
-  { id:2, author:"spammer_bot",   text:"Click here for free debate coins!! LIMITED OFFER!!!",                 debate:"UBI debate",             reason:"Spam",                   timeAgo:"2h ago" },
-];
-
-const USERS = [
-  { id:1, username:"future_coder",  email:"fc@mail.com",  role:"User",  joined:"Jan 2025", debates:12, status:"Active" },
-  { id:2, username:"senior_dev_99", email:"sd@mail.com",  role:"User",  joined:"Feb 2025", debates:34, status:"Active" },
-  { id:3, username:"angry_user_99", email:"au@mail.com",  role:"User",  joined:"Mar 2025", debates:2,  status:"Flagged" },
-  { id:4, username:"spammer_bot",   email:"sp@mail.com",  role:"User",  joined:"Mar 2025", debates:0,  status:"Banned" },
-  { id:5, username:"ai_researcher", email:"air@mail.com", role:"Admin", joined:"Dec 2024", debates:45, status:"Active" },
-];
-
-const STATS = [
-  { label:"Pending Reviews", value:"3",   icon:"⏳", color:"#F9C784" },
-  { label:"Flagged Content", value:"2",   icon:"🚩", color:"#F4A7B9" },
-  { label:"Active Debates",  value:"142", icon:"💬", color:"#7EC8C8" },
-  { label:"Total Users",     value:"1.2K",icon:"👥", color:"#B5A8D5" },
-];
+function formatTimeAgo(isoString) {
+  if (!isoString) return "";
+  const created = new Date(isoString);
+  const diffMs = Date.now() - created.getTime();
+  const mins = Math.max(0, Math.floor(diffMs / 60000));
+  if (mins < 60) return mins <= 1 ? "1m ago" : `${mins}m ago`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return hours <= 1 ? "1h ago" : `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  return days <= 1 ? "1d ago" : `${days}d ago`;
+}
 
 export default function Admin() {
   const navigate = useNavigate();
   const [tab,     setTab]     = useState("overview");
-  const [pending, setPending] = useState(PENDING_TOPICS);
-  const [flagged, setFlagged] = useState(FLAGGED_OPINIONS);
-  const [users,   setUsers]   = useState(USERS);
+  const accessToken = localStorage.getItem("access");
 
-  const approveTopic  = (id) => setPending((p) => p.filter((t) => t.id !== id));
-  const rejectTopic   = (id) => setPending((p) => p.filter((t) => t.id !== id));
-  const deleteOpinion = (id) => setFlagged((f) => f.filter((o) => o.id !== id));
-  const dismissFlag   = (id) => setFlagged((f) => f.filter((o) => o.id !== id));
-  const banUser       = (id) => setUsers((u) => u.map((usr) => usr.id===id ? {...usr,status:"Banned"} : usr));
+  const [pending, setPending] = useState([]);
+  const [opinions, setOpinions] = useState([]);
+  const [users, setUsers] = useState([]);
+  const [categories, setCategories] = useState([]);
+  const [stats, setStats] = useState({
+    pending_topics: 0,
+    pending_categories: 0,
+    approved_topics: 0,
+    approved_categories: 0,
+    total_users: 0,
+    active_users: 0,
+  });
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  const [categoryCreateName, setCategoryCreateName] = useState("");
+  const [categoryCreateDescription, setCategoryCreateDescription] = useState("");
+  const [editingCategoryId, setEditingCategoryId] = useState(null);
+  const [categoryEditName, setCategoryEditName] = useState("");
+  const [categoryEditDescription, setCategoryEditDescription] = useState("");
+
+  const authHeaders = useMemo(() => {
+    return accessToken ? { Authorization: `Bearer ${accessToken}` } : {};
+  }, [accessToken]);
+
+  const loadAll = async () => {
+    if (!accessToken) {
+      setError("Admin access requires login.");
+      return;
+    }
+
+    setLoading(true);
+    setError("");
+    try {
+      const [statsRes, pendingRes, opinionsRes, usersRes, categoriesRes] = await Promise.all([
+        authFetch(`${API_BASE}/api/admin/stats/`, { headers: authHeaders }),
+        authFetch(`${API_BASE}/api/admin/pending-topics/`, { headers: authHeaders }),
+        authFetch(`${API_BASE}/api/admin/opinions/recent/?limit=50`, { headers: authHeaders }),
+        authFetch(`${API_BASE}/api/admin/users/`, { headers: authHeaders }),
+        authFetch(`${API_BASE}/api/admin/categories/`, { headers: authHeaders }),
+      ]);
+
+      const all = [statsRes, pendingRes, opinionsRes, usersRes, categoriesRes];
+      const firstBad = all.find((r) => !r.ok);
+      if (firstBad) {
+        if (firstBad.status === 401) return logoutAndRedirect(navigate);
+        const json = await firstBad.json().catch(() => ({}));
+        const detail = json?.detail || `Request failed (${firstBad.status})`;
+        throw new Error(String(detail));
+      }
+
+      const statsJson = await statsRes.json();
+      const pendingJson = await pendingRes.json();
+      const opinionsJson = await opinionsRes.json();
+      const usersJson = await usersRes.json();
+      const categoriesJson = await categoriesRes.json();
+
+      setStats(statsJson);
+      setPending(
+        (pendingJson || []).map((t) => ({
+          id: t.id,
+          title: t.title,
+          category: t.category,
+          author: t.author,
+          submitted: formatTimeAgo(t.submittedAt),
+        }))
+      );
+      setOpinions(
+        (opinionsJson || []).map((o) => ({
+          id: o.id,
+          author: o.author,
+          text: o.content,
+          debate: o.debate,
+          reason: `${o.reason} (${o.reportCount})`,
+          timeAgo: formatTimeAgo(o.createdAt),
+        }))
+      );
+      setUsers(
+        (usersJson || []).map((u) => ({
+          id: u.id,
+          username: u.username,
+          email: u.email,
+          role: u.roleLabel,
+          debates: u.debates,
+          status: u.status,
+        }))
+      );
+      setCategories(
+        (categoriesJson || []).map((c) => ({
+          id: c.id,
+          name: c.name,
+          description: c.description,
+          status: c.status,
+          suggestedBy: c.suggestedBy || null,
+          createdAt: c.created_at ? formatTimeAgo(c.created_at) : "",
+        }))
+      );
+    } catch (e) {
+      setError(e?.message || "Failed to load admin data.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadAll();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [accessToken]);
+
+  const approveTopic = async (id) => {
+    setError("");
+    const res = await fetch(`${API_BASE}/api/admin/topics/${id}/approve/`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...authHeaders },
+      body: JSON.stringify({}),
+    });
+    if (!res.ok) {
+      const json = await res.json().catch(() => ({}));
+      setError(String(json?.detail || `Approve failed (${res.status})`));
+      return;
+    }
+    setPending((p) => p.filter((t) => t.id !== id));
+  };
+
+  const rejectTopic = async (id) => {
+    setError("");
+    const res = await fetch(`${API_BASE}/api/admin/topics/${id}/reject/`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...authHeaders },
+      body: JSON.stringify({}),
+    });
+    if (!res.ok) {
+      const json = await res.json().catch(() => ({}));
+      setError(String(json?.detail || `Reject failed (${res.status})`));
+      return;
+    }
+    setPending((p) => p.filter((t) => t.id !== id));
+  };
+
+  const deleteOpinion = async (id) => {
+    setError("");
+    const res = await fetch(`${API_BASE}/api/admin/opinions/${id}/`, {
+      method: "DELETE",
+      headers: { ...authHeaders },
+    });
+    if (!res.ok && res.status !== 204) {
+      const json = await res.json().catch(() => ({}));
+      setError(String(json?.detail || `Delete failed (${res.status})`));
+      return;
+    }
+    setOpinions((f) => f.filter((o) => o.id !== id));
+  };
+
+  const dismissFlag = (id) => setOpinions((f) => f.filter((o) => o.id !== id));
+
+  const banUser = async (id, value) => {
+    setError("");
+    const res = await authFetch(`${API_BASE}/api/admin/users/${id}/ban/`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...authHeaders },
+      body: JSON.stringify({ value }),
+    });
+    if (res.status === 401) return logoutAndRedirect(navigate);
+    if (!res.ok) {
+      const json = await res.json().catch(() => ({}));
+      setError(String(json?.detail || `Ban failed (${res.status})`));
+      return;
+    }
+    await loadAll();
+  };
+
+  const suspendUser = async (id, value) => {
+    setError("");
+    const res = await authFetch(`${API_BASE}/api/admin/users/${id}/suspend/`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...authHeaders },
+      body: JSON.stringify({ value }),
+    });
+    if (res.status === 401) return logoutAndRedirect(navigate);
+    if (!res.ok) {
+      const json = await res.json().catch(() => ({}));
+      setError(String(json?.detail || `Suspend failed (${res.status})`));
+      return;
+    }
+    await loadAll();
+  };
+
+  const createCategory = async () => {
+    setError("");
+    const name = categoryCreateName.trim();
+    const description = categoryCreateDescription.trim();
+
+    if (!name) {
+      setError("Category name is required.");
+      return;
+    }
+
+    const res = await fetch(`${API_BASE}/api/admin/categories/`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...authHeaders },
+      body: JSON.stringify({ name, description }),
+    });
+
+    if (!res.ok) {
+      const json = await res.json().catch(() => ({}));
+      setError(String(json?.detail || `Create failed (${res.status})`));
+      return;
+    }
+
+    setCategoryCreateName("");
+    setCategoryCreateDescription("");
+    await loadAll();
+  };
+
+  const startEditingCategory = (c) => {
+    setEditingCategoryId(c.id);
+    setCategoryEditName(c.name || "");
+    setCategoryEditDescription(c.description || "");
+    setError("");
+  };
+
+  const saveCategoryUpdate = async () => {
+    if (!editingCategoryId) return;
+    setError("");
+
+    const name = categoryEditName.trim();
+    const description = categoryEditDescription.trim();
+
+    if (!name) {
+      setError("Category name is required.");
+      return;
+    }
+
+    const res = await fetch(`${API_BASE}/api/admin/categories/${editingCategoryId}/`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json", ...authHeaders },
+      body: JSON.stringify({ name, description }),
+    });
+
+    if (!res.ok) {
+      const json = await res.json().catch(() => ({}));
+      setError(String(json?.detail || `Update failed (${res.status})`));
+      return;
+    }
+
+    setEditingCategoryId(null);
+    await loadAll();
+  };
+
+  const approveCategory = async (categoryId) => {
+    setError("");
+    const res = await fetch(`${API_BASE}/api/admin/categories/${categoryId}/approve/`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...authHeaders },
+      body: JSON.stringify({}),
+    });
+    if (!res.ok) {
+      const json = await res.json().catch(() => ({}));
+      setError(String(json?.detail || `Approve failed (${res.status})`));
+      return;
+    }
+    await loadAll();
+  };
+
+  const rejectCategory = async (categoryId) => {
+    setError("");
+    const res = await fetch(`${API_BASE}/api/admin/categories/${categoryId}/reject/`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...authHeaders },
+      body: JSON.stringify({}),
+    });
+    if (!res.ok) {
+      const json = await res.json().catch(() => ({}));
+      setError(String(json?.detail || `Reject failed (${res.status})`));
+      return;
+    }
+    await loadAll();
+  };
+
+  const deleteCategory = async (categoryId) => {
+    setError("");
+    const res = await fetch(`${API_BASE}/api/admin/categories/${categoryId}/`, {
+      method: "DELETE",
+      headers: { ...authHeaders },
+    });
+    if (!res.ok && res.status !== 204) {
+      const json = await res.json().catch(() => ({}));
+      setError(String(json?.detail || `Delete failed (${res.status})`));
+      return;
+    }
+    await loadAll();
+  };
 
   const tabs = [
     { key:"overview", label:"Overview",      icon:"📊" },
     { key:"topics",   label:"Pending Topics", icon:"⏳", badge: pending.length },
-    { key:"flagged",  label:"Flagged",        icon:"🚩", badge: flagged.length },
+    { key:"flagged",  label:"Moderate Opinions", icon:"🚩", badge: opinions.length },
     { key:"users",    label:"Users",          icon:"👥" },
+    { key:"categories", label:"Categories", icon:"📚", badge: categories.filter((c) => c.status === "pending").length },
+  ];
+
+  const STATS = [
+    { label:"Pending Reviews", value:String(stats.pending_topics), icon:"⏳", color:"#F9C784" },
+    { label:"Pending Categories", value:String(stats.pending_categories), icon:"📚", color:"#B5A8D5" },
+    { label:"Approved Debates", value:String(stats.approved_topics), icon:"💬", color:"#7EC8C8" },
+    { label:"Total Users", value:String(stats.total_users), icon:"👥", color:"#F4A7B9" },
   ];
 
   return (
@@ -68,6 +349,18 @@ export default function Admin() {
           </div>
           <button onClick={() => navigate("/")} style={{ background:"transparent", border:"1px solid rgba(255,255,255,0.1)", color:"rgba(240,236,255,0.5)", borderRadius:8, padding:"8px 16px", cursor:"pointer", fontSize:13, fontFamily:"'Space Grotesk',sans-serif" }}>← Back to Site</button>
         </div>
+
+        {error && (
+          <div style={{ marginBottom: 18, background:"rgba(244,167,185,0.1)", border:"1px solid rgba(244,167,185,0.25)", borderRadius:12, padding:"12px 14px", color:"#F4A7B9", fontSize:13, fontFamily:"'Space Mono',monospace" }}>
+            {error} {error.includes("login") ? "Go to Login page and sign in with an admin account." : ""}
+          </div>
+        )}
+
+        {loading && (
+          <div style={{ marginBottom: 18, color:"rgba(240,236,255,0.35)", fontSize:13, fontFamily:"'Space Mono',monospace" }}>
+            Loading admin data...
+          </div>
+        )}
 
         {/* Stats */}
         <div style={{ display:"grid", gridTemplateColumns:"repeat(4,1fr)", gap:14, marginBottom:36, animation:"fadeSlideIn 0.5s ease 0.05s both" }}>
@@ -111,9 +404,9 @@ export default function Admin() {
               }
             </div>
             <div style={{ background:"rgba(255,255,255,0.04)", border:"1px solid rgba(255,255,255,0.08)", borderRadius:16, padding:"24px" }}>
-              <h3 style={{ fontFamily:"'Lora',serif", fontSize:18, fontWeight:700, marginBottom:16, color:"#f0ecff" }}>🚩 Flagged Content ({flagged.length})</h3>
-              {flagged.length===0 ? <p style={{ color:"rgba(240,236,255,0.3)", fontSize:13 }}>No flagged content right now.</p>
-                : flagged.slice(0,2).map((f) => (
+              <h3 style={{ fontFamily:"'Lora',serif", fontSize:18, fontWeight:700, marginBottom:16, color:"#f0ecff" }}>🚩 Opinions for Moderation ({opinions.length})</h3>
+              {opinions.length===0 ? <p style={{ color:"rgba(240,236,255,0.3)", fontSize:13 }}>No opinions loaded.</p>
+                : opinions.slice(0,2).map((f) => (
                   <div key={f.id} style={{ borderBottom:"1px solid rgba(255,255,255,0.06)", paddingBottom:12, marginBottom:12 }}>
                     <p style={{ color:"rgba(240,236,255,0.6)", fontSize:12, marginBottom:6, fontStyle:"italic", lineHeight:1.4 }}>"{f.text.slice(0,80)}..."</p>
                     <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center" }}>
@@ -154,9 +447,9 @@ export default function Admin() {
         {/* FLAGGED */}
         {tab==="flagged" && (
           <div style={{ display:"flex", flexDirection:"column", gap:14, animation:"fadeSlideIn 0.4s ease both" }}>
-            {flagged.length===0
-              ? <div style={{ textAlign:"center", padding:"60px 0", color:"rgba(240,236,255,0.3)", fontFamily:"'Space Mono',monospace" }}>✓ No flagged content!</div>
-              : flagged.map((f) => (
+            {opinions.length===0
+              ? <div style={{ textAlign:"center", padding:"60px 0", color:"rgba(240,236,255,0.3)", fontFamily:"'Space Mono',monospace" }}>No opinions to moderate.</div>
+              : opinions.map((f) => (
                 <div key={f.id} style={{ background:"rgba(244,167,185,0.04)", border:"1px solid rgba(244,167,185,0.15)", borderRadius:14, padding:"22px 24px" }}>
                   <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:12 }}>
                     <div>
@@ -191,13 +484,171 @@ export default function Admin() {
                   <span style={{ color:"rgba(240,236,255,0.4)", fontSize:13 }}>{user.email}</span>
                   <span style={{ color: user.role==="Admin" ? "#F9C784" : "rgba(240,236,255,0.4)", fontSize:12, fontFamily:"'Space Mono',monospace" }}>{user.role}</span>
                   <span style={{ color:"rgba(240,236,255,0.5)", fontSize:13 }}>{user.debates}</span>
-                  <span style={{ background: user.status==="Active" ? "rgba(126,200,200,0.12)" : user.status==="Flagged" ? "rgba(249,199,132,0.12)" : "rgba(244,167,185,0.12)", color: user.status==="Active" ? "#7EC8C8" : user.status==="Flagged" ? "#F9C784" : "#F4A7B9", border:`1px solid ${user.status==="Active" ? "rgba(126,200,200,0.25)" : user.status==="Flagged" ? "rgba(249,199,132,0.25)" : "rgba(244,167,185,0.25)"}`, borderRadius:5, padding:"2px 8px", fontSize:11, fontFamily:"'Space Mono',monospace", display:"inline-block" }}>{user.status}</span>
-                  {user.status!=="Banned"&&user.role!=="Admin"
-                    ? <button onClick={() => banUser(user.id)} style={{ background:"transparent", border:"1px solid rgba(244,167,185,0.25)", color:"rgba(244,167,185,0.7)", borderRadius:6, padding:"4px 10px", cursor:"pointer", fontSize:11, fontFamily:"'Space Mono',monospace" }}>Ban</button>
-                    : <span style={{ color:"rgba(240,236,255,0.15)", fontSize:11 }}>—</span>
-                  }
+                  <span style={{ background: user.status==="Active" ? "rgba(126,200,200,0.12)" : user.status==="Suspended" ? "rgba(249,199,132,0.12)" : "rgba(244,167,185,0.12)", color: user.status==="Active" ? "#7EC8C8" : user.status==="Suspended" ? "#F9C784" : "#F4A7B9", border:`1px solid ${user.status==="Active" ? "rgba(126,200,200,0.25)" : user.status==="Suspended" ? "rgba(249,199,132,0.25)" : "rgba(244,167,185,0.25)"}`, borderRadius:5, padding:"2px 8px", fontSize:11, fontFamily:"'Space Mono',monospace", display:"inline-block" }}>{user.status}</span>
+                  {user.role !== "Admin" ? (
+                    <div style={{ display:"flex", gap:8 }}>
+                      {user.status !== "Suspended" && (
+                        <button
+                          onClick={() => suspendUser(user.id, true)}
+                          style={{ background:"transparent", border:"1px solid rgba(126,200,200,0.25)", color:"rgba(126,200,200,0.7)", borderRadius:6, padding:"4px 10px", cursor:"pointer", fontSize:11, fontFamily:"'Space Mono',monospace" }}
+                        >
+                          Suspend
+                        </button>
+                      )}
+                      {user.status !== "Banned" && (
+                        <button
+                          onClick={() => banUser(user.id, true)}
+                          style={{ background:"transparent", border:"1px solid rgba(244,167,185,0.25)", color:"rgba(244,167,185,0.7)", borderRadius:6, padding:"4px 10px", cursor:"pointer", fontSize:11, fontFamily:"'Space Mono',monospace" }}
+                        >
+                          Ban
+                        </button>
+                      )}
+                      {user.status === "Suspended" && (
+                        <button
+                          onClick={() => suspendUser(user.id, false)}
+                          style={{ background:"transparent", border:"1px solid rgba(126,200,200,0.25)", color:"rgba(126,200,200,0.7)", borderRadius:6, padding:"4px 10px", cursor:"pointer", fontSize:11, fontFamily:"'Space Mono',monospace" }}
+                        >
+                          Unsuspend
+                        </button>
+                      )}
+                      {user.status === "Banned" && (
+                        <button
+                          onClick={() => banUser(user.id, false)}
+                          style={{ background:"transparent", border:"1px solid rgba(126,200,200,0.25)", color:"rgba(126,200,200,0.7)", borderRadius:6, padding:"4px 10px", cursor:"pointer", fontSize:11, fontFamily:"'Space Mono',monospace" }}
+                        >
+                          Unban
+                        </button>
+                      )}
+                    </div>
+                  ) : (
+                    <span style={{ color:"rgba(240,236,255,0.15)", fontSize:11 }}>—</span>
+                  )}
                 </div>
               ))}
+            </div>
+          </div>
+        )}
+
+        {/* CATEGORIES */}
+        {tab==="categories" && (
+          <div style={{ display:"flex", flexDirection:"column", gap:20, animation:"fadeSlideIn 0.4s ease both" }}>
+            <div style={{ background:"rgba(255,255,255,0.04)", border:"1px solid rgba(255,255,255,0.08)", borderRadius:16, padding:"24px" }}>
+              <h3 style={{ fontFamily:"'Lora',serif", fontSize:18, fontWeight:700, marginBottom:14, color:"#f0ecff" }}>Create Category</h3>
+              <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
+                <input
+                  value={categoryCreateName}
+                  onChange={(e) => setCategoryCreateName(e.target.value)}
+                  placeholder="Category name"
+                  style={{ background:"rgba(255,255,255,0.05)", border:"1px solid rgba(255,255,255,0.1)", borderRadius:10, padding:"10px 14px", color:"#f0ecff", fontSize:13, fontFamily:"'Space Grotesk',sans-serif", outline:"none" }}
+                />
+                <textarea
+                  value={categoryCreateDescription}
+                  onChange={(e) => setCategoryCreateDescription(e.target.value)}
+                  placeholder="Description (optional)"
+                  rows={3}
+                  style={{ background:"rgba(255,255,255,0.05)", border:"1px solid rgba(255,255,255,0.1)", borderRadius:10, padding:"10px 14px", color:"#f0ecff", fontSize:13, fontFamily:"'Space Grotesk',sans-serif", resize:"vertical", outline:"none" }}
+                />
+                <button
+                  onClick={createCategory}
+                  style={{ background:"linear-gradient(135deg,#7EC8C8,#a8dede)", border:"none", color:"#1a1625", borderRadius:10, padding:"10px 18px", fontWeight:700, cursor:"pointer", fontSize:14, fontFamily:"'Space Grotesk',sans-serif" }}
+                >
+                  Create
+                </button>
+              </div>
+            </div>
+
+            <div style={{ background:"rgba(255,255,255,0.04)", border:"1px solid rgba(255,255,255,0.08)", borderRadius:16, padding:"24px" }}>
+              <h3 style={{ fontFamily:"'Lora',serif", fontSize:18, fontWeight:700, marginBottom:16, color:"#f0ecff" }}>All Categories</h3>
+
+              {categories.length===0 ? (
+                <div style={{ color:"rgba(240,236,255,0.3)", fontSize:13, fontFamily:"'Space Mono',monospace" }}>No categories found.</div>
+              ) : (
+                <div style={{ display:"flex", flexDirection:"column", gap:12 }}>
+                  {categories.map((c) => (
+                    <div key={c.id} style={{ border:"1px solid rgba(255,255,255,0.08)", borderRadius:14, padding:"16px 16px" }}>
+                      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", gap:12 }}>
+                        <div style={{ flex:1 }}>
+                          {editingCategoryId===c.id ? (
+                            <>
+                              <input
+                                value={categoryEditName}
+                                onChange={(e) => setCategoryEditName(e.target.value)}
+                                style={{ width:"100%", marginBottom:10, background:"rgba(255,255,255,0.05)", border:"1px solid rgba(255,255,255,0.1)", borderRadius:10, padding:"10px 14px", color:"#f0ecff", fontSize:13, fontFamily:"'Space Grotesk',sans-serif", outline:"none" }}
+                              />
+                              <textarea
+                                value={categoryEditDescription}
+                                onChange={(e) => setCategoryEditDescription(e.target.value)}
+                                rows={3}
+                                style={{ width:"100%", marginBottom:10, background:"rgba(255,255,255,0.05)", border:"1px solid rgba(255,255,255,0.1)", borderRadius:10, padding:"10px 14px", color:"#f0ecff", fontSize:13, fontFamily:"'Space Grotesk',sans-serif", resize:"vertical", outline:"none" }}
+                              />
+                            </>
+                          ) : (
+                            <>
+                              <div style={{ display:"flex", gap:10, alignItems:"center", marginBottom:8, flexWrap:"wrap" }}>
+                                <span style={{ color:"#f0ecff", fontSize:14, fontWeight:700 }}>{c.name}</span>
+                                <span style={{ color:"rgba(240,236,255,0.35)", fontSize:11, fontFamily:"'Space Mono',monospace" }}>{c.createdAt ? `Created ${c.createdAt}` : ""}</span>
+                                <span style={{ background:"rgba(255,255,255,0.03)", border:"1px solid rgba(255,255,255,0.08)", color:"rgba(240,236,255,0.5)", borderRadius:999, padding:"2px 10px", fontSize:11, fontFamily:"'Space Mono',monospace" }}>{c.status}</span>
+                              </div>
+                              {c.description ? <p style={{ color:"rgba(240,236,255,0.6)", fontSize:13, lineHeight:1.6 }}>{c.description}</p> : <p style={{ color:"rgba(240,236,255,0.25)", fontSize:13, lineHeight:1.6 }}>No description.</p>}
+                            </>
+                          )}
+                        </div>
+
+                        <div style={{ display:"flex", flexDirection:"column", gap:8, alignItems:"flex-end", minWidth:220 }}>
+                          {editingCategoryId===c.id ? (
+                            <>
+                              <button
+                                onClick={saveCategoryUpdate}
+                                style={{ background:"linear-gradient(135deg,#7EC8C8,#a8dede)", border:"none", color:"#1a1625", borderRadius:10, padding:"8px 14px", fontWeight:700, cursor:"pointer", fontSize:13, fontFamily:"'Space Grotesk',sans-serif" }}
+                              >
+                                Save
+                              </button>
+                              <button
+                                onClick={() => setEditingCategoryId(null)}
+                                style={{ background:"transparent", border:"1px solid rgba(255,255,255,0.12)", color:"rgba(240,236,255,0.5)", borderRadius:10, padding:"8px 14px", cursor:"pointer", fontSize:13, fontFamily:"'Space Grotesk',sans-serif" }}
+                              >
+                                Cancel
+                              </button>
+                            </>
+                          ) : (
+                            <>
+                              <button
+                                onClick={() => startEditingCategory(c)}
+                                style={{ background:"transparent", border:"1px solid rgba(255,255,255,0.12)", color:"rgba(240,236,255,0.5)", borderRadius:10, padding:"8px 14px", cursor:"pointer", fontSize:13, fontFamily:"'Space Grotesk',sans-serif" }}
+                              >
+                                Edit
+                              </button>
+                              <button
+                                onClick={() => deleteCategory(c.id)}
+                                style={{ background:"rgba(244,167,185,0.15)", border:"1px solid rgba(244,167,185,0.3)", color:"#F4A7B9", borderRadius:10, padding:"8px 14px", cursor:"pointer", fontSize:13, fontFamily:"'Space Grotesk',sans-serif" }}
+                              >
+                                Delete
+                              </button>
+                            </>
+                          )}
+
+                          {c.status==="pending" && editingCategoryId!==c.id && (
+                            <>
+                              <button
+                                onClick={() => approveCategory(c.id)}
+                                style={{ background:"rgba(126,200,200,0.15)", border:"1px solid rgba(126,200,200,0.35)", color:"#7EC8C8", borderRadius:10, padding:"8px 14px", cursor:"pointer", fontSize:13, fontWeight:700, fontFamily:"'Space Grotesk',sans-serif" }}
+                              >
+                                Approve
+                              </button>
+                              <button
+                                onClick={() => rejectCategory(c.id)}
+                                style={{ background:"rgba(244,167,185,0.15)", border:"1px solid rgba(244,167,185,0.35)", color:"#F4A7B9", borderRadius:10, padding:"8px 14px", cursor:"pointer", fontSize:13, fontWeight:700, fontFamily:"'Space Grotesk',sans-serif" }}
+                              >
+                                Reject
+                              </button>
+                            </>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           </div>
         )}
