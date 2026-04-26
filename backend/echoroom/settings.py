@@ -1,28 +1,21 @@
 """
-Django settings for echoroom project.
-
-Configured for:
-- Django REST Framework (DRF)
-- JWT auth (SimpleJWT)
-- MySQL database connection
-- CORS for React frontend
+Django settings for echoroom project (Render-ready)
 """
 
 from __future__ import annotations
 
 from datetime import timedelta
 from pathlib import Path
-
+import os
 import environ
-
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
-# Load variables from backend/.env (and allow environment overrides)
+# ENV setup
 env = environ.Env(
     DEBUG=(bool, False),
     SECRET_KEY=(str, "change-me"),
-    ALLOWED_HOSTS=(list, ["localhost", "127.0.0.1"]),
+    ALLOWED_HOSTS=(list, [".onrender.com", "localhost", "127.0.0.1"]),
     CORS_ALLOWED_ORIGINS=(list, ["http://localhost:3000"]),
     DB_NAME=(str, "echoroom"),
     DB_USER=(str, "echoroom"),
@@ -40,6 +33,7 @@ DEBUG = env("DEBUG")
 ALLOWED_HOSTS = env("ALLOWED_HOSTS")
 
 
+# APPS
 INSTALLED_APPS = [
     "django.contrib.admin",
     "django.contrib.auth",
@@ -47,16 +41,21 @@ INSTALLED_APPS = [
     "django.contrib.sessions",
     "django.contrib.messages",
     "django.contrib.staticfiles",
+
     # Third-party
     "corsheaders",
     "rest_framework",
+
     # Local apps
     "accounts",
     "debates",
 ]
 
+
+# MIDDLEWARE
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
+    "whitenoise.middleware.WhiteNoiseMiddleware",  # 👈 important for Render
     "corsheaders.middleware.CorsMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
@@ -65,6 +64,7 @@ MIDDLEWARE = [
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
 ]
+
 
 ROOT_URLCONF = "echoroom.urls"
 
@@ -86,50 +86,55 @@ TEMPLATES = [
 WSGI_APPLICATION = "echoroom.wsgi.application"
 
 
-# Database (MySQL)
-DATABASES = {
-    "default": {
-        "ENGINE": "django.db.backends.mysql",
-        "NAME": env("DB_NAME"),
-        "USER": env("DB_USER"),
-        "PASSWORD": env("DB_PASSWORD"),
-        "HOST": env("DB_HOST"),
-        "PORT": env("DB_PORT"),
-        "OPTIONS": {
-            "charset": "utf8mb4",
-        },
+# DATABASE (Flexible)
+if "DATABASE_URL" in os.environ:
+    # 👉 Render PostgreSQL (recommended)
+    DATABASES = {
+        "default": env.db()
     }
-}
+else:
+    # 👉 fallback to MySQL (your current setup)
+    DATABASES = {
+        "default": {
+            "ENGINE": "django.db.backends.mysql",
+            "NAME": env("DB_NAME"),
+            "USER": env("DB_USER"),
+            "PASSWORD": env("DB_PASSWORD"),
+            "HOST": env("DB_HOST"),
+            "PORT": env("DB_PORT"),
+            "OPTIONS": {
+                "charset": "utf8mb4",
+            },
+        }
+    }
 
 
+# PASSWORD VALIDATION
 AUTH_PASSWORD_VALIDATORS = [
-    {
-        "NAME": "django.contrib.auth.password_validation.UserAttributeSimilarityValidator",
-    },
-    {
-        "NAME": "django.contrib.auth.password_validation.MinimumLengthValidator",
-    },
-    {
-        "NAME": "django.contrib.auth.password_validation.CommonPasswordValidator",
-    },
-    {
-        "NAME": "django.contrib.auth.password_validation.NumericPasswordValidator",
-    },
+    {"NAME": "django.contrib.auth.password_validation.UserAttributeSimilarityValidator"},
+    {"NAME": "django.contrib.auth.password_validation.MinimumLengthValidator"},
+    {"NAME": "django.contrib.auth.password_validation.CommonPasswordValidator"},
+    {"NAME": "django.contrib.auth.password_validation.NumericPasswordValidator"},
 ]
 
 
+# INTERNATIONAL
 LANGUAGE_CODE = "en-us"
 TIME_ZONE = "UTC"
 USE_I18N = True
 USE_TZ = True
 
 
+# STATIC FILES (IMPORTANT FOR RENDER)
 STATIC_URL = "static/"
+STATIC_ROOT = os.path.join(BASE_DIR, "staticfiles")
+STATICFILES_STORAGE = "whitenoise.storage.CompressedManifestStaticFilesStorage"
+
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
 
-# Auth + API defaults
+# AUTH
 AUTH_USER_MODEL = "accounts.User"
 
 REST_FRAMEWORK = {
@@ -142,18 +147,27 @@ REST_FRAMEWORK = {
 }
 
 
+# JWT
 SIMPLE_JWT = {
-    "ACCESS_TOKEN_LIFETIME": timedelta(
-        minutes=env("JWT_ACCESS_TOKEN_LIFETIME_MINUTES")
-    ),
+    "ACCESS_TOKEN_LIFETIME": timedelta(minutes=env("JWT_ACCESS_TOKEN_LIFETIME_MINUTES")),
     "REFRESH_TOKEN_LIFETIME": timedelta(days=env("JWT_REFRESH_TOKEN_LIFETIME_DAYS")),
-    # Keep it simple for now (no blacklist rotation tables)
     "ROTATE_REFRESH_TOKENS": False,
     "BLACKLIST_AFTER_ROTATION": False,
     "AUTH_HEADER_TYPES": ("Bearer",),
 }
 
 
-# CORS for React frontend
-CORS_ALLOWED_ORIGINS = env("CORS_ALLOWED_ORIGINS")
+# CORS
+CORS_ALLOWED_ORIGINS = env(
+    "CORS_ALLOWED_ORIGINS",
+    default=[
+        "http://localhost:3000",
+        "https://echoroom-two.vercel.app/",  # 👈 your frontend
+    ],
+)
+
 CORS_ALLOW_CREDENTIALS = False
+
+
+# SECURITY (Render)
+SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
